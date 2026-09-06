@@ -12,14 +12,35 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Download IUIT CSV
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Download IUIT via JSON
         run: |
-          curl -L -A "Mozilla/5.0" \
-          -H "Referer: https://www.ishares.com/uk/individual/en/products/280510/ishares-sp-500-information-technology-sector-ucits-etf/" \
-          -H "X-Requested-With: XMLHttpRequest" \
-          "https://www.ishares.com/uk/individual/en/products/280510/ishares-sp-500-information-technology-sector-ucits-etf/fund/1506575576011.ajax?fileType=csv&fileName=IUIT_holdings&dataType=fund" \
-          -o IUIT_holdings.csv
-          head -n 3 IUIT_holdings.csv
+          python - << 'PY'
+          import requests, json, csv, datetime
+          asof = datetime.datetime.utcnow().strftime("%Y%m%d")
+          url = f"https://www.ishares.com/uk/individual/en/products/280510/ishares-sp-500-information-technology-sector-ucits-etf/1506575576011.ajax?fileType=json&tab=all&asOfDate={asof}"
+          headers = {
+              "User-Agent": "Mozilla/5.0",
+              "Referer": "https://www.ishares.com/uk/individual/en/products/280510/ishares-sp-500-information-technology-sector-ucits-etf/",
+              "X-Requested-With": "XMLHttpRequest"
+          }
+          r = requests.get(url, headers=headers, timeout=30)
+          print(f"Status {r.status_code}, len {len(r.text)}")
+          data = r.json()
+          rows = data.get('aaData') or data.get('data') or []
+          print(f"Found {len(rows)} holdings")
+          # aaData format: [ticker, name, sector, asset_class, mktVal{raw}, weight{raw}, notional{raw}, shares{raw}, cusip, isin, sedol, price{raw}, location, exchange, currency, fx, maturity]
+          with open('IUIT_holdings.csv','w',newline='',encoding='utf-8') as f:
+              w = csv.writer(f)
+              w.writerow(["Ticker","Name","Sector","Asset Class","Market Value","Weight (%)","Notional Value","Shares","Price"])
+              for r in rows:
+                  try:
+                      w.writerow([r[0], r[1], r[2], r[3], r[4].get('raw') if isinstance(r[4],dict) else r[4], r[5].get('raw') if isinstance(r[5],dict) else r[5], r[6].get('raw') if isinstance(r[6],dict) else r[6], r[7].get('raw') if isinstance(r[7],dict) else r[7], r[11].get('raw') if isinstance(r[11],dict) else r[11]])
+                  except Exception as e:
+                      print(e, r[:3])
+          PY
       - name: Commit
         run: |
           git config user.name "bot"
