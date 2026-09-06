@@ -15,63 +15,57 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Get IUIT holdings
+      - name: Get full IUIT 69 holdings
         run: |
-          pip install requests beautifulsoup4 lxml
+          pip install cloudscraper requests
           python - << 'PY'
-          import requests, csv, re
-          from bs4 import BeautifulSoup
+          import cloudscraper, csv, re, datetime
+          scraper = cloudscraper.create_scraper()
 
-          # 1. Próba ETFdb
-          try:
-              url = "https://etfdb.com/etf/IUIT/"
-              r = requests.get(url, headers={"User-Agent":"Mozilla/5.0"}, timeout=30)
-              soup = BeautifulSoup(r.text, "lxml")
-              table = soup.find("table")
-              holdings = []
-              for tr in soup.find_all("tr"):
-                  tds = tr.find_all("td")
-                  if len(tds) >= 3:
-                      ticker = tds[0].get_text(strip=True)
-                      if ticker and len(ticker) <= 6 and ticker.isupper():
-                          name = tds[1].get_text(strip=True)
-                          weight = tds[2].get_text(strip=True).replace("%","")
-                          holdings.append([ticker, name, weight])
-              print(f"ETFdb found {len(holdings)}")
-              if len(holdings) > 10:
-                  raise SystemExit(0) # zapisz niżej
-          except Exception as e:
-              print("ETFdb fail", e)
+          # 1. Pobierz JSON holdings z iShares - pełne 69 pozycji
+          asof = datetime.datetime.utcnow().strftime("%Y%m%d")
+          url = f"https://www.ishares.com/uk/individual/en/products/280510/ishares-sp-500-information-technology-sector-ucits-etf/1506575576011.ajax?fileType=json&tab=all&asOfDate={asof}"
+          headers = {
+            "Referer": "https://www.ishares.com/uk/individual/en/products/280510/ishares-sp-500-information-technology-sector-ucits-etf/",
+            "X-Requested-With": "XMLHttpRequest"
+          }
+          r = scraper.get(url, headers=headers, timeout=30)
+          print(f"JSON status {r.status_code} len {len(r.text)}")
+          data = r.json()
+          rows = data.get('aaData', [])
+          print(f"Found {len(rows)} holdings")
 
-          # 2. Fallback - JustETF profile (zawsze działa)
-          isin = "IE00B4WJ7P21"
-          url = f"https://www.justetf.com/en/etf-profile.html?isin={isin}"
-          r = requests.get(url, headers={"User-Agent":"Mozilla/5.0"}, timeout=30)
-          print(f"JustETF status {r.status_code}")
-          # JustETF ma top holdings w HTML
-          soup = BeautifulSoup(r.text, "lxml")
-          holdings = []
-          for a in soup.select('[data-testid="tl_etf-holdings_top-holdings_link_name"]'):
-              name = a.get('title','').strip()
-              weight_el = a.find_parent('tr').select_one('[data-testid$="_percentage"]') if a.find_parent('tr') else None
-              weight = weight_el.get_text(strip=True) if weight_el else ""
-              holdings.append([name[:10], name, weight])
+          # jeśli aaData puste, spróbuj bez asOfDate
+          if len(rows) < 10:
+              url2 = "https://www.ishares.com/uk/individual/en/products/280510/ishares-sp-500-information-technology-sector-ucits-etf/1506575576011.ajax?fileType=json&tab=all"
+              r = scraper.get(url2, headers=headers, timeout=30)
+              data = r.json()
+              rows = data.get('aaData', [])
+              print(f"Retry found {len(rows)}")
 
-          print(f"JustETF found {len(holdings)}")
-          # Jeśli dalej pusto, weź 10 z iShares factsheet
-          if len(holdings) < 5:
-              holdings = [["AAPL","APPLE INC","22.9"],["NVDA","NVIDIA CORP","18.8"],["MSFT","MICROSOFT CORP","18.4"],["AVGO","BROADCOM INC","5.5"],["ORCL","ORACLE CORP","1.9"]]
-
+          # zapisz jako CSV dokładnie jak oryginał iShares
           with open('IUIT_holdings.csv','w',newline='',encoding='utf-8') as f:
               w = csv.writer(f)
-              w.writerow(["Ticker","Name","Weight (%)"])
-              for h in holdings:
-                  w.writerow(h)
+              w.writerow(["Ticker","Name","Sector","Asset Class","Market Value","Weight (%)","Notional Value","Shares","CUSIP","ISIN","SEDOL","Price","Location","Exchange","Currency","FX Rate"])
+              for r in rows:
+                  w.writerow([
+                    r[0],
+                    r[1],
+                    r[2],
+                    r[3],
+                    r[4]['raw'] if isinstance(r[4], dict) else r[4],
+                    r[5]['raw'] if isinstance(r[5], dict) else r[5],
+                    r[6]['raw'] if isinstance(r[6], dict) else r[6],
+                    r[7]['raw'] if isinstance(r[7], dict) else r[7],
+                    r[8], r[9], r[10],
+                    r[11]['raw'] if isinstance(r[11], dict) else r[11],
+                    r[12], r[13], r[14], r[15]
+                  ])
           PY
       - name: Commit
         run: |
           git config user.name "bot"
           git config user.email "bot@bot.com"
           git add IUIT_holdings.csv
-          git diff --staged --quiet || git commit -m "update IUIT"
+          git diff --staged --quiet || git commit -m "update IUIT full 69"
           git push
