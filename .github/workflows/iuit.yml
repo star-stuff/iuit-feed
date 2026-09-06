@@ -1,0 +1,25 @@
+name: IUIT daily
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download IUIT CSV
+        run: |
+          curl -L -A "Mozilla/5.0" \
+          -H "Referer: https://www.ishares.com/uk/individual/en/products/280510/ishares-sp-500-information-technology-sector-ucits-etf/" \
+          -H "X-Requested-With: XMLHttpRequest" \
+          "https://www.ishares.com/uk/individual/en/products/280510/ishares-sp-500-information-technology-sector-ucits-etf/fund/1506575576011.ajax?fileType=csv&fileName=IUIT_holdings&dataType=fund" \
+          -o IUIT_holdings.csv
+          head -n 5 IUIT_holdings.csv
+      - name: Commit
+        run: |
+          git config user.name "bot"
+          git config user.email "bot@bot.com"
+          git add IUIT_holdings.csv
+          git diff --staged --quiet || git commit -m "update IUIT"
+          git push
